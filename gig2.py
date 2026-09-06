@@ -5,318 +5,274 @@ from urllib.parse import quote_plus
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-from google import genai
-from google.genai import types
 
 
-# ============================================================
-# AI MOOD MUSIC RECOMMENDER
-# AI + Streamlit
-# ============================================================
+# =========================================================
+# CONFIG
+# =========================================================
+
+OPENROUTER_MODEL = "openrouter/free"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
+
+
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
 st.set_page_config(
-    page_title="AI Mood Music Recommender",
+    page_title="AI Mood Music",
     page_icon="🎵",
-    layout="wide",
-)
-
-# ------------------------------------------------------------
-# UI
-# ------------------------------------------------------------
-
-st.markdown(
-    """
-    <style>
-    .hero {
-        padding: 2rem;
-        border-radius: 22px;
-        background: linear-gradient(135deg, #172554, #312e81, #581c87);
-        color: white;
-        margin-bottom: 1.5rem;
-    }
-
-    .hero h1 {
-        font-size: 2.5rem;
-        margin-bottom: .3rem;
-    }
-
-    .card {
-        padding: 1.2rem;
-        border-radius: 16px;
-        border: 1px solid rgba(128,128,128,.25);
-        margin: .6rem 0;
-        background: rgba(128,128,128,.06);
-    }
-
-    .song-title {
-        font-size: 1.25rem;
-        font-weight: 700;
-    }
-
-    .muted {
-        opacity: .7;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+    layout="wide"
 )
 
 
-# ------------------------------------------------------------
-# Music database
-# ------------------------------------------------------------
+# =========================================================
+# OPENROUTER AI
+# =========================================================
 
-SONGS = {
-    "Happy": [
-        {"title": "Katchi Sera", "artist": "Sai Abhyankkar"},
-        {"title": "Aasa Kooda", "artist": "Sai Abhyankkar"},
-        {"title": "Happy", "artist": "Pharrell Williams"},
-        {"title": "On Top of the World", "artist": "Imagine Dragons"},
-    ],
-    "Sad": [
-        {"title": "Someone Like You", "artist": "Adele"},
-        {"title": "Fix You", "artist": "Coldplay"},
-        {"title": "Yesterday", "artist": "The Beatles"},
-        {"title": "The Night We Met", "artist": "Lord Huron"},
-    ],
-    "Energetic": [
-        {"title": "Eye of the Tiger", "artist": "Survivor"},
-        {"title": "Lose Yourself", "artist": "Eminem"},
-        {"title": "Don't Stop Me Now", "artist": "Queen"},
-        {"title": "Believer", "artist": "Imagine Dragons"},
-    ],
-    "Calm": [
-        {"title": "Munbe Vaa", "artist": "A. R. Rahman"},
-        {"title": "Weightless", "artist": "Marconi Union"},
-        {"title": "Clair de Lune", "artist": "Claude Debussy"},
-        {"title": "Come Away With Me", "artist": "Norah Jones"},
-    ],
-}
-
-
-# ------------------------------------------------------------
-# Historical user profiles
-# ------------------------------------------------------------
-
-USER_PROFILES = {
-    "User A": {
-        "Morning": "Energetic",
-        "Afternoon": "Calm",
-        "Evening": "Happy",
-        "Night": "Calm",
-    },
-    "User B": {
-        "Morning": "Happy",
-        "Afternoon": "Energetic",
-        "Evening": "Happy",
-        "Night": "Calm",
-    },
-    "User C": {
-        "Morning": "Energetic",
-        "Afternoon": "Happy",
-        "Evening": "Energetic",
-        "Night": "Calm",
-    },
-}
-
-
-# ------------------------------------------------------------
-# Gemini configuration
-# ------------------------------------------------------------
-
-GEMINI_MODEL = "gemini-3.6-flash"
-
-MOOD_VALUES = [
-    "Happy",
-    "Sad",
-    "Energetic",
-    "Calm",
-]
-
-
-def get_gemini_client():
-    """Create a Gemini client from Streamlit secrets."""
+def get_openrouter_key():
 
     try:
-        api_key = st.secrets["GEMINI_API_KEY"]
+        return st.secrets["OPENROUTER_API_KEY"]
+
     except Exception:
-        return None
-
-    if not api_key:
-        return None
-
-    return genai.Client(api_key=api_key)
+        st.error("OPENROUTER_API_KEY is missing from Streamlit Secrets.")
+        st.stop()
 
 
-# ------------------------------------------------------------
-# Real AI story analysis
-# ------------------------------------------------------------
+def ask_ai(prompt):
 
-def analyze_story_with_gemini(
-    story: str,
-    time_of_day: str,
-    activity: str,
-    historical_mood: str,
-):
-    """
-    Uses Gemini to understand the user's story and return
-    structured emotion/mood data.
+    api_key = get_openrouter_key()
 
-    The four final recommendation moods remain:
-    Happy, Sad, Energetic, Calm.
-    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://streamlit.io/",
+        "X-Title": "AI Mood Music Recommender"
+    }
 
-    client = get_gemini_client()
+    data = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an AI music recommendation assistant. "
+                    "Analyze emotions carefully and recommend suitable real songs."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2000
+    }
 
-    if client is None:
-        raise RuntimeError(
-            "GEMINI_API_KEY is missing. "
-            "Create .streamlit/secrets.toml and add your Gemini API key."
+    response = requests.post(
+        OPENROUTER_URL,
+        headers=headers,
+        json=data,
+        timeout=60
+    )
+
+    if response.status_code != 200:
+        raise Exception(
+            f"OpenRouter error {response.status_code}: "
+            f"{response.text}"
         )
 
-    system_instruction = """
-You are the AI emotion-analysis engine inside a college
-AI-based music recommendation project.
+    result = response.json()
 
-Your job is to understand a user's free-form story.
+    return result["choices"][0]["message"]["content"]
 
-Do NOT simply search for keywords. Understand the meaning,
-context, emotional tone, and situation described by the user.
 
-You may identify rich emotions such as:
-Romantic, Excited, Happy, Sad, Relaxed, Calm, Lonely,
-Stressed, Tired, Angry, Hopeful, Nostalgic, Confident,
-Curious, Nervous, etc.
+# =========================================================
+# JSON CLEANER
+# =========================================================
 
-The final music mood MUST be exactly one of:
-Happy, Sad, Energetic, Calm.
+def clean_json(text):
 
-Decision rules:
-1. The user's current story is the strongest signal.
-2. Activity and time of day are supporting signals.
-3. Historical mood is also a supporting signal.
-4. If the current story conflicts with historical mood,
-   prioritize the current story and mark mood_shift as true.
-5. A romantic or positive story can map to Happy.
-6. A peaceful or tired story can map to Calm.
-7. An exciting/action-oriented story can map to Energetic.
-8. A clearly negative/emotional story can map to Sad.
-9. Do not diagnose medical or mental-health conditions.
-10. Return only data matching the requested JSON schema.
-"""
+    text = text.strip()
+
+    if text.startswith("```"):
+        text = text.replace("```json", "")
+        text = text.replace("```", "")
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1 and end != -1:
+        text = text[start:end + 1]
+
+    return json.loads(text)
+
+
+# =========================================================
+# STORY ANALYSIS
+# =========================================================
+
+def analyze_story(story, time_of_day, activity, historical_mood):
 
     prompt = f"""
-Analyze this user's story.
+Analyze the following person's story and determine their current emotional state.
 
-USER STORY:
+STORY:
 {story}
 
 TIME OF DAY:
 {time_of_day}
 
-CURRENT ACTIVITY:
+ACTIVITY:
 {activity}
 
-HISTORICAL MOOD:
+PREVIOUS MOOD:
 {historical_mood}
 
-Return:
-- primary_emotion
-- secondary_emotions
-- final_mood
-- confidence from 0 to 100
-- emotion_scores
-- detected_signals
-- reason
-- mood_shift
+Return ONLY valid JSON.
 
-The reason should explain the decision in simple language
-that a college-project user can understand.
+Use this exact structure:
+
+{{
+    "primary_emotion": "emotion",
+    "secondary_emotions": ["emotion1", "emotion2"],
+    "final_mood": "Happy",
+    "confidence": 0.85,
+    "emotion_scores": {{
+        "Happy": 0.0,
+        "Sad": 0.0,
+        "Energetic": 0.0,
+        "Calm": 0.0
+    }},
+    "detected_signals": ["signal1", "signal2"],
+    "reason": "short explanation",
+    "mood_shift": "short explanation"
+}}
+
+final_mood MUST be one of:
+
+Happy
+Sad
+Energetic
+Calm
+
+confidence must be between 0 and 1.
+
+emotion_scores must contain values between 0 and 1.
 """
 
-    # Gemini 3.6 Flash uses the current Interactions API.
-    interaction = client.interactions.create(
-        model=GEMINI_MODEL,
-        input=prompt,
-        system_instruction=system_instruction,
-        generation_config={
-            "thinking_level": "low",
-        },
-    )
+    result = ask_ai(prompt)
 
-    raw = getattr(interaction, "output_text", None)
+    return clean_json(result)
 
-    if not raw:
-        raw_parts = []
 
-        for step in getattr(interaction, "steps", []) or []:
-            for content in getattr(step, "content", []) or []:
-                text = getattr(content, "text", None)
-                if text:
-                    raw_parts.append(text)
+# =========================================================
+# AI SONG RECOMMENDATIONS
+# =========================================================
 
-        raw = "".join(raw_parts)
+def recommend_songs(
+    story,
+    analysis,
+    activity,
+    time_of_day,
+    previous_songs
+):
 
-    if not raw:
-        raise RuntimeError("AI returned an empty response.")
+    prompt = f"""
+You are an intelligent AI music recommendation system.
 
-    raw = raw.strip()
+Recommend 5 REAL songs based on the user's current emotional state.
 
-    if raw.startswith("```"):
-        raw = raw.replace("```json", "", 1)
-        raw = raw.replace("```", "", 1).strip()
+USER STORY:
+{story}
+
+AI EMOTION ANALYSIS:
+{json.dumps(analysis, indent=2)}
+
+ACTIVITY:
+{activity}
+
+TIME:
+{time_of_day}
+
+PREVIOUSLY RECOMMENDED SONGS:
+{previous_songs}
+
+Important requirements:
+
+1. Recommend REAL songs that actually exist.
+2. Do not invent songs.
+3. Match the emotional situation, not just the mood label.
+4. Consider the activity and time.
+5. Avoid repeating previous songs.
+6. Mix popular and highly suitable songs.
+7. Include the artist.
+8. Explain briefly why each song fits.
+9. Return ONLY valid JSON.
+
+Use exactly this structure:
+
+{{
+    "songs": [
+        {{
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "why": "Why this song fits the user's current emotional state"
+        }},
+        {{
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "why": "Why this song fits"
+        }},
+        {{
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "why": "Why this song fits"
+        }},
+        {{
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "why": "Why this song fits"
+        }},
+        {{
+            "title": "Song Title",
+            "artist": "Artist Name",
+            "why": "Why this song fits"
+        }}
+    ]
+}}
+"""
+
+    result = ask_ai(prompt)
+
+    return clean_json(result)
+
+
+# =========================================================
+# YOUTUBE SEARCH
+# =========================================================
+
+def search_youtube_video(title, artist):
 
     try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "AI returned a response that was not valid JSON. "
-            "Please try again."
-        ) from exc
 
-
-    # Safety validation in application code.
-    if result.get("final_mood") not in MOOD_VALUES:
-        result["final_mood"] = "Calm"
-
-    result["confidence"] = max(
-        0,
-        min(100, int(result.get("confidence", 50))),
-    )
-
-    return result
-
-
-# ------------------------------------------------------------
-# YouTube player
-# ------------------------------------------------------------
-
-def search_youtube_video(title: str, artist: str):
-    """
-    Find a real YouTube video ID using the YouTube Data API.
-
-    Gemini decides the song. YouTube's API finds the actual video.
-    The embeddable filter helps avoid videos that cannot play inside
-    the Streamlit website.
-    """
-    try:
         api_key = st.secrets["YOUTUBE_API_KEY"]
+
     except Exception:
+
         return None
 
-    if not api_key:
-        return None
-
-    # Search for the official song first.
     queries = [
         f"{artist} {title} official",
         f"{title} {artist} official music video",
-        f"{title} {artist} song",
+        f"{title} {artist} song"
     ]
 
-    endpoint = "https://www.googleapis.com/youtube/v3/search"
-
     for query in queries:
+
         params = {
             "part": "snippet",
             "q": query,
@@ -325,634 +281,362 @@ def search_youtube_video(title: str, artist: str):
             "videoEmbeddable": "true",
             "videoSyndicated": "true",
             "regionCode": "IN",
-            "key": api_key,
+            "key": api_key
         }
 
-        response = requests.get(
-            endpoint,
-            params=params,
-            timeout=10,
-        )
+        try:
 
-        if response.status_code != 200:
-            continue
+            response = requests.get(
+                YOUTUBE_SEARCH_URL,
+                params=params,
+                timeout=20
+            )
 
-        data = response.json()
+            if response.status_code != 200:
+                continue
 
-        for item in data.get("items", []):
-            video_id = item.get("id", {}).get("videoId")
-            video_title = item.get("snippet", {}).get("title", "")
+            data = response.json()
 
-            if video_id:
+            items = data.get("items", [])
+
+            if items:
+
+                video_id = items[0]["id"]["videoId"]
+
                 return {
                     "video_id": video_id,
-                    "title": video_title,
                     "url": f"https://www.youtube.com/watch?v={video_id}",
+                    "title": items[0]["snippet"]["title"]
                 }
+
+        except Exception:
+            continue
 
     return None
 
 
-def youtube_player(video_id: str):
-    """Embed a verified YouTube video inside Streamlit."""
+# =========================================================
+# YOUTUBE PLAYER
+# =========================================================
+
+def youtube_player(video_id):
+
     components.iframe(
         f"https://www.youtube.com/embed/{video_id}",
-        height=430,
-        scrolling=False,
+        height=420
     )
 
 
-# ------------------------------------------------------------
-# AI song recommendation layer
-# ------------------------------------------------------------
-
-def recommend_songs_with_gemini(
-    story: str,
-    analysis: dict,
-    activity: str,
-    time_of_day: str,
-    previous_songs: list[str],
-):
-    """
-    AI chooses the actual songs based on the user's story,
-    detected emotions, mood and context.
-
-    YouTube is only used afterwards to find the real playable video.
-    """
-    client = get_gemini_client()
-
-    if client is None:
-        raise RuntimeError(
-            "GEMINI_API_KEY is missing. "
-            "Create .streamlit/secrets.toml and add your Gemini API key."
-        )
-
-    system_instruction = """
-You are the music recommendation engine inside an AI mood music
-recommendation project.
-
-Your job is to recommend REAL songs that genuinely fit the user's
-specific story and emotional situation.
-
-Do NOT choose songs from a fixed list.
-Do NOT recommend generic songs just because they match the final mood.
-Understand the story, emotions, situation, language/context and activity.
-
-You may recommend Tamil, English, Hindi or other songs when appropriate.
-Prefer songs that are well-known and likely to have an official or
-legitimate YouTube upload.
-
-Avoid recommending songs already present in PREVIOUSLY RECOMMENDED SONGS.
-
-Return exactly 5 song recommendations.
-
-Return ONLY valid JSON in this structure:
-{
-  "songs": [
-    {
-      "title": "Song title",
-      "artist": "Artist name",
-      "why": "Short explanation of why this song fits the story"
-    }
-  ]
-}
-"""
-
-    previous_text = ", ".join(previous_songs[-20:]) if previous_songs else "None"
-
-    prompt = f"""
-USER STORY:
-{story}
-
-AI EMOTION ANALYSIS:
-Primary emotion: {analysis.get("primary_emotion", "")}
-Secondary emotions: {", ".join(analysis.get("secondary_emotions", []))}
-Final mood: {analysis.get("final_mood", "")}
-Confidence: {analysis.get("confidence", 0)}%
-
-TIME OF DAY:
-{time_of_day}
-
-CURRENT ACTIVITY:
-{activity}
-
-PREVIOUSLY RECOMMENDED SONGS:
-{previous_text}
-
-Recommend 5 different real songs that best fit THIS specific story.
-Do not repeat any previous song.
-For each song, explain briefly why it fits.
-"""
-
-    interaction = client.interactions.create(
-        model=GEMINI_MODEL,
-        input=prompt,
-        system_instruction=system_instruction,
-        generation_config={
-            "thinking_level": "low",
-        },
-    )
-
-    raw = getattr(interaction, "output_text", None)
-
-    if not raw:
-        raw_parts = []
-        for step in getattr(interaction, "steps", []) or []:
-            for content in getattr(step, "content", []) or []:
-                value = getattr(content, "text", None)
-                if value:
-                    raw_parts.append(value)
-        raw = "".join(raw_parts)
-
-    if not raw:
-        raise RuntimeError("AI returned an empty song recommendation response.")
-
-    raw = raw.strip()
-
-    if raw.startswith("```"):
-        raw = raw.replace("```json", "", 1)
-        raw = raw.replace("```", "", 1).strip()
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "AI returned invalid song recommendation JSON. Please try again."
-        ) from exc
-
-    songs = result.get("songs", [])
-
-    if not isinstance(songs, list):
-        raise RuntimeError("AI returned an invalid song list.")
-
-    cleaned = []
-    seen = set()
-
-    for song in songs:
-        title = str(song.get("title", "")).strip()
-        artist = str(song.get("artist", "")).strip()
-        why = str(song.get("why", "")).strip()
-
-        if not title or not artist:
-            continue
-
-        key = f"{title.lower()}|{artist.lower()}"
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-
-        cleaned.append(
-            {
-                "title": title,
-                "artist": artist,
-                "why": why,
-            }
-        )
-
-    if not cleaned:
-        raise RuntimeError("AI did not return usable song recommendations.")
-
-    return cleaned[:5]
-
-
-# ============================================================
+# =========================================================
 # SESSION STATE
-# ============================================================
+# =========================================================
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "songs" not in st.session_state:
+    st.session_state.songs = []
+
 if "analysis" not in st.session_state:
     st.session_state.analysis = None
 
-if "recommendations" not in st.session_state:
-    st.session_state.recommendations = None
 
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-with st.sidebar:
-
-    st.header("⚙️ Context")
-
-    user = st.selectbox(
-        "User",
-        list(USER_PROFILES.keys()),
-    )
-
-    time_of_day = st.selectbox(
-        "Time of Day",
-        [
-            "Morning",
-            "Afternoon",
-            "Evening",
-            "Night",
-        ],
-    )
-
-    activity = st.selectbox(
-        "Current Activity",
-        [
-            "Relaxing",
-            "Study",
-            "Workout",
-            "Commuting",
-            "Party",
-            "None / Not specified",
-        ],
-    )
-
-    historical_mood = USER_PROFILES[user][time_of_day]
-
-    st.divider()
-
-    st.caption("Historical preference")
-
-    st.info(
-        f"{user} usually prefers **{historical_mood}** "
-        f"during the {time_of_day.lower()}."
-    )
-
-    if st.button(
-        "🗑️ Clear Session",
-        use_container_width=True,
-    ):
-        st.session_state.history = []
-        st.session_state.analysis = None
-        st.session_state.recommendations = None
-        st.rerun()
-
-
-# ============================================================
+# =========================================================
 # HEADER
-# ============================================================
+# =========================================================
 
-st.markdown(
-    """
-    <div class="hero">
-        <h1>🎵 AI Mood Music Recommender</h1>
-        <p>
-            Tell AI what's on your mind. AI understands the emotion,
-            finds your mood and recommends songs.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.title("🎵 AI Mood Music")
 
 st.write(
-    "Your story is the primary signal. Time of day, activity "
-    "and historical preference are supporting signals."
+    "Tell the AI what's on your mind. "
+    "It analyzes your emotions and creates a personalized playlist."
 )
 
 
-# ============================================================
-# STORY INPUT
-# ============================================================
+# =========================================================
+# SIDEBAR
+# =========================================================
 
-st.header("📝 Tell Me Your Story")
+st.sidebar.header("Your Context")
+
+user = st.sidebar.selectbox(
+    "User",
+    ["User A", "User B", "User C"]
+)
+
+time_of_day = st.sidebar.selectbox(
+    "Time of Day",
+    [
+        "Morning",
+        "Afternoon",
+        "Evening",
+        "Night"
+    ]
+)
+
+activity = st.sidebar.selectbox(
+    "What are you doing?",
+    [
+        "Relaxing",
+        "Studying",
+        "Working",
+        "Workout",
+        "Travelling",
+        "Sleeping",
+        "Free time"
+    ]
+)
+
+historical_mood = st.sidebar.selectbox(
+    "Previous Mood",
+    [
+        "Happy",
+        "Sad",
+        "Energetic",
+        "Calm"
+    ]
+)
+
+
+# =========================================================
+# STORY INPUT
+# =========================================================
 
 story = st.text_area(
     "What's on your mind?",
     placeholder=(
-        "Example: I had a really good day today. I finished something "
-        "I had been working on for a long time, and now I feel proud and relaxed..."
+        "I had a really good day today. "
+        "I finished something I had been working on for a long time, "
+        "and now I feel proud and relaxed..."
     ),
-    height=180,
+    height=150
 )
 
+
+# =========================================================
+# ANALYZE BUTTON
+# =========================================================
+
 if st.button(
-    "🧠 Analyze My Story with AI",
-    type="primary",
-    use_container_width=True,
+    "✨ Analyze My Mood",
+    use_container_width=True
 ):
 
     if not story.strip():
 
-        st.warning(
-            "Please tell Gemini a little about your day first."
-        )
+        st.warning("Please tell me what's on your mind first.")
 
     else:
 
-        with st.spinner(
-            "🤖 AI is understanding your story..."
-        ):
+        with st.spinner("AI is understanding your story..."):
 
             try:
 
-                analysis = analyze_story_with_gemini(
-                    story=story,
-                    time_of_day=time_of_day,
-                    activity=activity,
-                    historical_mood=historical_mood,
+                analysis = analyze_story(
+                    story,
+                    time_of_day,
+                    activity,
+                    historical_mood
                 )
-
-                previous_songs = [
-                    item.get("song", "")
-                    for item in st.session_state.history
-                    if item.get("song")
-                ]
-
-                # AI now chooses the actual songs based on the story.
-                recommendations = recommend_songs_with_gemini(
-                    story=story,
-                    analysis=analysis,
-                    activity=activity,
-                    time_of_day=time_of_day,
-                    previous_songs=previous_songs,
-                )
-
-                # YouTube only finds the real playable video for each
-                # song selected by Gemini.
-                for song in recommendations:
-                    song["youtube"] = search_youtube_video(
-                        song["title"],
-                        song["artist"],
-                    )
 
                 st.session_state.analysis = analysis
-                st.session_state.recommendations = recommendations
 
-                st.session_state.history.append(
-                    {
-                        "time": datetime.now().strftime("%I:%M %p"),
-                        "user": user,
-                        "mood": analysis["final_mood"],
-                        "emotion": analysis["primary_emotion"],
-                        "activity": activity,
-                        "time_of_day": time_of_day,
-                        "song": f"{recommendations[0]['title']} — {recommendations[0]['artist']}",
-                    }
-                )
+            except Exception as e:
 
-            except Exception as error:
+                st.error(f"AI analysis failed: {e}")
 
-                st.error(
-                    "AI could not analyze the story."
-                )
-                st.code(str(error))
+                st.stop()
 
 
-# ============================================================
-# AI ANALYSIS
-# ============================================================
+        # =================================================
+        # AI ANALYSIS
+        # =================================================
 
-analysis = st.session_state.analysis
+        st.subheader("🧠 AI Mood Analysis")
 
-if analysis:
+        col1, col2, col3 = st.columns(3)
 
-    st.divider()
-
-    st.header("🧠 AI Emotion Analysis")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric(
-            "Primary Emotion",
-            analysis["primary_emotion"],
-        )
-
-    with c2:
-        st.metric(
-            "Final Music Mood",
-            analysis["final_mood"],
-        )
-
-    with c3:
-        st.metric(
-            "AI Confidence",
-            f'{analysis["confidence"]}%',
-        )
-
-    if analysis["secondary_emotions"]:
-        st.write(
-            "**Secondary emotions:** "
-            + ", ".join(
-                analysis["secondary_emotions"]
+        with col1:
+            st.metric(
+                "Primary Emotion",
+                analysis["primary_emotion"]
             )
-        )
 
-    st.subheader("💡 Why did AI choose this mood?")
+        with col2:
+            st.metric(
+                "Final Mood",
+                analysis["final_mood"]
+            )
 
-    st.info(
-        analysis["reason"]
-    )
-
-    if analysis["mood_shift"]:
-
-        st.warning(
-            f"🔄 **Mood Shift Detected:** Your historical mood "
-            f"is **{historical_mood}**, but your current story "
-            f"suggests **{analysis['final_mood']}**. "
-            "The current story receives higher priority."
-        )
-
-    else:
-
-        st.success(
-            f"✅ Current story mood is consistent with your "
-            f"historical **{historical_mood}** preference."
-        )
-
-
-# ============================================================
-# EMOTION SCORES
-# ============================================================
-
-if analysis:
-
-    st.subheader("📊 Emotion Signals")
-
-    emotion_scores = analysis["emotion_scores"]
-
-    ranked = sorted(
-        emotion_scores.items(),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    shown = 0
-
-    for emotion, score in ranked:
-
-        if score <= 0:
-            continue
+        with col3:
+            st.metric(
+                "Confidence",
+                f"{analysis['confidence'] * 100:.0f}%"
+            )
 
         st.write(
-            f"**{emotion} — {score}%**"
+            "**Why AI thinks this:**",
+            analysis["reason"]
         )
 
-        st.progress(
-            min(100, int(score))
+        st.write(
+            "**Mood shift:**",
+            analysis["mood_shift"]
         )
 
-        shown += 1
 
-        if shown >= 6:
-            break
+        # =================================================
+        # EMOTION SCORES
+        # =================================================
 
-    if analysis["detected_signals"]:
+        st.subheader("📊 Emotion Scores")
 
-        st.subheader("🔍 What AI noticed")
+        scores = analysis["emotion_scores"]
+
+        for emotion, score in scores.items():
+
+            st.write(
+                f"**{emotion} — {score * 100:.0f}%**"
+            )
+
+            st.progress(float(score))
+
+
+        # =================================================
+        # DETECTED SIGNALS
+        # =================================================
+
+        st.subheader("🔎 Story Signals")
 
         for signal in analysis["detected_signals"]:
+
             st.write(f"• {signal}")
 
 
-# ============================================================
-# SONG RECOMMENDATIONS
-# ============================================================
+        # =================================================
+        # AI SONG RECOMMENDATION
+        # =================================================
 
-recommendations = st.session_state.recommendations
+        previous_songs = [
+            item["title"]
+            for item in st.session_state.history
+        ]
 
-if recommendations:
+        with st.spinner("AI is choosing songs for you..."):
 
-    st.divider()
+            try:
 
-    st.header("🎵 Personalized Playlist")
-
-    # First recommendation is the main "Now Playing" result.
-    now_playing = recommendations[0]
-
-    st.subheader("▶️ Now Playing — AI's Top Recommendation")
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="song-title">
-                🎵 {now_playing["title"]}
-            </div>
-            <div>
-                Artist: {now_playing["artist"]}
-            </div>
-            <div class="muted">
-                Selected from your story, emotion and context.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if now_playing.get("youtube"):
-        youtube_player(now_playing["youtube"]["video_id"])
-        st.caption(
-            f"Playing YouTube result: {now_playing['youtube']['title']}"
-        )
-        st.link_button(
-            "Open this song on YouTube ↗",
-            now_playing["youtube"]["url"],
-        )
-    else:
-        st.warning(
-            "No embeddable YouTube result was found for this song. "
-            "Add a YouTube API key in Streamlit secrets."
-        )
-
-    st.subheader("🎶 More Recommended Songs")
-
-    for index, song in enumerate(
-        recommendations[1:],
-        start=2,
-    ):
-        with st.expander(
-            f"🎵 Track {index}: {song['title']} — {song['artist']}"
-        ):
-            if song.get("why"):
-                st.write(f"🧠 **Why Gemini chose it:** {song['why']}")
-
-            if song.get("youtube"):
-                youtube_player(song["youtube"]["video_id"])
-                st.link_button(
-                    "Open on YouTube ↗",
-                    song["youtube"]["url"],
-                )
-            else:
-                st.caption(
-                    "No embeddable YouTube result found."
+                recommendation = recommend_songs(
+                    story,
+                    analysis,
+                    activity,
+                    time_of_day,
+                    previous_songs
                 )
 
-    with st.expander("🔬 View AI Decision Pipeline"):
+                songs = recommendation["songs"]
 
-        st.code(
-            f"""
-USER STORY
-    ↓
-GEMINI AI
-    ↓
-Primary Emotion: {analysis["primary_emotion"]}
-    ↓
-Final Mood: {analysis["final_mood"]}
-    ↓
-Historical Mood: {historical_mood}
-    ↓
-Time: {time_of_day}
-    ↓
-Activity: {activity}
-    ↓
-Mood Shift: {analysis["mood_shift"]}
-    ↓
-PERSONALIZED PLAYLIST
-    ↓
-YOUTUBE PLAYER
-            """,
-            language="text",
-        )
+                st.session_state.songs = songs
+
+            except Exception as e:
+
+                st.error(
+                    f"Song recommendation failed: {e}"
+                )
+
+                st.stop()
 
 
-# ============================================================
+        # =================================================
+        # PLAYLIST
+        # =================================================
+
+        st.subheader("🎧 Your AI Playlist")
+
+        for index, song in enumerate(songs):
+
+            title = song["title"]
+            artist = song["artist"]
+            why = song["why"]
+
+            with st.container():
+
+                st.markdown(
+                    f"### {index + 1}. {title}"
+                )
+
+                st.write(
+                    f"**Artist:** {artist}"
+                )
+
+                youtube = search_youtube_video(
+                    title,
+                    artist
+                )
+
+                if youtube:
+
+                    youtube_player(
+                        youtube["video_id"]
+                    )
+
+                else:
+
+                    st.info(
+                        "YouTube video could not be found."
+                    )
+
+                st.write(
+                    f"💡 **Why AI chose it:** {why}"
+                )
+
+                st.divider()
+
+
+                # Save history
+
+                if not any(
+                    h["title"] == title
+                    for h in st.session_state.history
+                ):
+
+                    st.session_state.history.append({
+                        "title": title,
+                        "artist": artist,
+                        "time": datetime.now().strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                    })
+
+
+# =========================================================
 # HISTORY
-# ============================================================
-
-st.divider()
-
-st.header("📈 Mood History")
+# =========================================================
 
 if st.session_state.history:
+
+    st.subheader("🕘 Listening History")
 
     for item in reversed(
         st.session_state.history[-10:]
     ):
 
-        st.markdown(
-            f"""
-            <div class="card">
-                <b>{item["time"]}</b> ·
-                {item["user"]} ·
-                <b>{item["mood"]}</b> ·
-                {item["emotion"]} ·
-                {item["activity"]}
-                <br>
-                🎵 {item["song"]}
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.write(
+            f"🎵 **{item['title']}** — "
+            f"{item['artist']} "
+            f"({item['time']})"
         )
 
-else:
 
-    st.caption(
-        "Your previous AI mood analyses will appear here."
-    )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
+# =========================================================
+# PIPELINE
+# =========================================================
 
 st.divider()
 
-st.caption(
-    "AI Mood Music Recommender • AI • YouTube Data API • Streamlit"
-)
+st.subheader("⚙️ AI Decision Pipeline")
 
-with st.expander("⚙️ YouTube API setup"):
-    st.write(
-        "Add YOUTUBE_API_KEY to .streamlit/secrets.toml. "
-        "The app uses YouTube's official search API to find a real "
-        "embeddable video instead of guessing a YouTube URL."
-    )
+st.write(
+    "Story → Emotion Detection → Context Analysis → "
+    "AI Recommendation → YouTube Search → Music Playback"
+)
